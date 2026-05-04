@@ -88,10 +88,14 @@ async function sendToN8n(data: any) {
 }
 
 function getAmoCrmBaseUrl() {
+    const tokenApiDomain = getAmoCrmApiDomain(parseAmoCrmAccessToken(process.env.AMOCRM_ACCESS_TOKEN));
+    if (tokenApiDomain) return `https://${tokenApiDomain}`;
+
     const rawDomain = process.env.AMOCRM_DOMAIN || process.env.AMOCRM_SUBDOMAIN;
     if (!rawDomain) return null;
 
     const cleanDomain = rawDomain
+        .replace(/^\uFEFF/, '')
         .replace(/^https?:\/\//, '')
         .replace(/\/.*$/, '')
         .trim();
@@ -104,8 +108,36 @@ function normalizePhone(phone: unknown) {
     return String(phone || '').replace(/[^\d+]/g, '');
 }
 
+function parseAmoCrmAccessToken(rawToken: string | undefined) {
+    const cleanToken = String(rawToken || '').replace(/^\uFEFF/, '').trim();
+    if (!cleanToken) return '';
+
+    try {
+        const tokenBundle = JSON.parse(cleanToken);
+        return String(tokenBundle.access_token || '').trim();
+    } catch {
+        return cleanToken;
+    }
+}
+
+function getAmoCrmApiDomain(accessToken: string) {
+    try {
+        const payload = accessToken.split('.')[1];
+        if (!payload) return null;
+        const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const paddedPayload = normalizedPayload.padEnd(
+            normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+            '=',
+        );
+        const claims = JSON.parse(Buffer.from(paddedPayload, 'base64').toString('utf8'));
+        return typeof claims.api_domain === 'string' ? claims.api_domain : null;
+    } catch {
+        return null;
+    }
+}
+
 async function sendToAmoCrm(data: any) {
-    const accessToken = process.env.AMOCRM_ACCESS_TOKEN;
+    const accessToken = parseAmoCrmAccessToken(process.env.AMOCRM_ACCESS_TOKEN);
     const baseUrl = getAmoCrmBaseUrl();
 
     if (!accessToken || !baseUrl) {
