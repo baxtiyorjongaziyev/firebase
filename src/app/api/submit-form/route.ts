@@ -5,6 +5,10 @@ import { escapeTelegramHtml } from '@/lib/server/telegram';
 const UZS_TO_USD_RATE = 1 / 12700;
 const DEFAULT_N8N_WEBHOOK_URL = 'https://n8n-automation-agent-982617914297.us-central1.run.app/webhook/lead-capture';
 
+function cleanSecret(value: string | undefined) {
+    return String(value || '').replace(/^\uFEFF/, '').trim();
+}
+
 async function sendMetaConversionEvent(data: any) {
     const accessToken = process.env.META_API_ACCESS_TOKEN;
     const pixelId = '1134785364752294';
@@ -109,7 +113,7 @@ function normalizePhone(phone: unknown) {
 }
 
 function parseAmoCrmAccessToken(rawToken: string | undefined) {
-    const cleanToken = String(rawToken || '').replace(/^\uFEFF/, '').trim();
+    const cleanToken = cleanSecret(rawToken);
     if (!cleanToken) return '';
 
     try {
@@ -244,9 +248,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: "Too many requests" }, { status: 429 });
     }
 
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    const messageThreadId = process.env.TELEGRAM_MESSAGE_THREAD_ID;
+    const botToken = cleanSecret(process.env.TELEGRAM_BOT_TOKEN);
+    const chatId = cleanSecret(process.env.TELEGRAM_CHAT_ID);
+    const messageThreadId = cleanSecret(process.env.TELEGRAM_MESSAGE_THREAD_ID);
 
     if (!botToken || !chatId) {
         return NextResponse.json({ ok: false, error: "Server configuration error" }, { status: 500 });
