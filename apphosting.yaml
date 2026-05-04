@@ -1,5 +1,18 @@
 # Settings to manage and configure a Firebase App Hosting backend.
 # https://firebase.google.com/docs/app-hosting/configure
+# Public Sanity config is needed during Next.js build for sitemap/blog data.
+env:
+  - variable: NEXT_PUBLIC_SANITY_PROJECT_ID
+    value: h6ymmj0v
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_SANITY_DATASET
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME
+
 # Using the Node.js runtime buildpack
 run:
   command: npm start
