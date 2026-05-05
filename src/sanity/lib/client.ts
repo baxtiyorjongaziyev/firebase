@@ -1,11 +1,8 @@
 import { createClient } from 'next-sanity'
 
-export const sanityProjectId = process.env.NEXT_PUBLIC_SANITY_PROJECT_ID || 'h6ymmj0v'
-export const sanityDataset = process.env.NEXT_PUBLIC_SANITY_DATASET || 'production'
-
 export const client = createClient({
-  projectId: sanityProjectId,
-  dataset: sanityDataset,
+  projectId: process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,
+  dataset: process.env.NEXT_PUBLIC_SANITY_DATASET,
   apiVersion: '2024-04-14',
   useCdn: false, // In production, this should be true for faster delivery
 })

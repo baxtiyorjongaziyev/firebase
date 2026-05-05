@@ -3,11 +3,6 @@ import { getClientIp, isRateLimited } from '@/lib/server/rate-limit';
 import { escapeTelegramHtml } from '@/lib/server/telegram';
 
 const UZS_TO_USD_RATE = 1 / 12700;
-const DEFAULT_N8N_WEBHOOK_URL = 'https://n8n-automation-agent-982617914297.us-central1.run.app/webhook/lead-capture';
-
-function cleanSecret(value: string | undefined) {
-    return String(value || '').replace(/^\uFEFF/, '').trim();
-}
 
 async function sendMetaConversionEvent(data: any) {
     const accessToken = process.env.META_API_ACCESS_TOKEN;
@@ -75,7 +70,7 @@ async function sendGAConversionEvent(data: any) {
 }
 
 async function sendToN8n(data: any) {
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || DEFAULT_N8N_WEBHOOK_URL;
+    const n8nWebhookUrl = 'https://n8n-automation-agent-982617914297.us-central1.run.app/webhook/lead-capture';
     try {
         await fetch(n8nWebhookUrl, {
             method: 'POST',
@@ -91,166 +86,15 @@ async function sendToN8n(data: any) {
     }
 }
 
-function getAmoCrmBaseUrl() {
-    const tokenApiDomain = getAmoCrmApiDomain(parseAmoCrmAccessToken(process.env.AMOCRM_ACCESS_TOKEN));
-    if (tokenApiDomain) return `https://${tokenApiDomain}`;
-
-    const rawDomain = process.env.AMOCRM_DOMAIN || process.env.AMOCRM_SUBDOMAIN;
-    if (!rawDomain) return null;
-
-    const cleanDomain = rawDomain
-        .replace(/^\uFEFF/, '')
-        .replace(/^https?:\/\//, '')
-        .replace(/\/.*$/, '')
-        .trim();
-
-    if (!cleanDomain) return null;
-    return `https://${cleanDomain.includes('.') ? cleanDomain : `${cleanDomain}.amocrm.ru`}`;
-}
-
-function normalizePhone(phone: unknown) {
-    return String(phone || '').replace(/[^\d+]/g, '');
-}
-
-function parseAmoCrmAccessToken(rawToken: string | undefined) {
-    const cleanToken = cleanSecret(rawToken);
-    if (!cleanToken) return '';
-
-    try {
-        const tokenBundle = JSON.parse(cleanToken);
-        return String(tokenBundle.access_token || '').trim();
-    } catch {
-        return cleanToken;
-    }
-}
-
-function getAmoCrmApiDomain(accessToken: string) {
-    try {
-        const payload = accessToken.split('.')[1];
-        if (!payload) return null;
-        const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
-        const paddedPayload = normalizedPayload.padEnd(
-            normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
-            '=',
-        );
-        const claims = JSON.parse(Buffer.from(paddedPayload, 'base64').toString('utf8'));
-        return typeof claims.api_domain === 'string' ? claims.api_domain : null;
-    } catch {
-        return null;
-    }
-}
-
-async function sendToAmoCrm(data: any) {
-    const accessToken = parseAmoCrmAccessToken(process.env.AMOCRM_ACCESS_TOKEN);
-    const baseUrl = getAmoCrmBaseUrl();
-
-    if (!accessToken || !baseUrl) {
-        return { ok: false, skipped: true, error: 'AmoCRM configuration is missing' };
-    }
-
-    const fullName = String(data.fullName || 'Website lead').trim();
-    const phone = normalizePhone(data.phone);
-    const telegram = String(data.telegram || '').replace(/^@/, '').trim();
-    const source = data.source || 'website_contact_form';
-    const price = Number(data.totalPrice) || 0;
-
-    const details = [
-        `Manba: ${source}`,
-        data.lang ? `Til: ${String(data.lang).toUpperCase()}` : '',
-        data.phone ? `Telefon: ${data.phone}` : '',
-        telegram ? `Telegram: @${telegram}` : '',
-        data.role ? `Rol: ${data.role}` : '',
-        data.revenue ? `Oborot: ${data.revenue}` : '',
-        data.ambition ? `Maqsad: ${data.ambition}` : '',
-        data.pain ? `To'siq: ${data.pain}` : '',
-        data.budget ? `Byudjet: ${data.budget}` : '',
-        data.packageSummary ? `Paket: ${data.packageSummary}` : '',
-        price ? `Narx: ${price.toLocaleString('fr-FR')} so'm` : '',
-    ].filter(Boolean).join('\n');
-
-    const contactFields: any[] = [];
-    if (phone) {
-        contactFields.push({
-            field_code: 'PHONE',
-            values: [{ value: phone, enum_code: 'WORK' }],
-        });
-    }
-    const leadPayload: any[] = [{
-        name: `Jon.Branding site: ${fullName}`,
-        price,
-        tags_to_add: [
-            { name: 'jonbranding.uz' },
-            { name: 'website' },
-            { name: String(source) },
-        ],
-        _embedded: {
-            contacts: [{
-                first_name: fullName,
-                ...(contactFields.length ? { custom_fields_values: contactFields } : {}),
-            }],
-        },
-    }];
-
-    const createResponse = await fetch(`${baseUrl}/api/v4/leads/complex`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(leadPayload),
-    });
-    const createResult: any = await createResponse.json().catch(() => null);
-
-    if (!createResponse.ok) {
-        const message = createResult?.title || createResult?.detail || createResult?.message || `AmoCRM HTTP ${createResponse.status}`;
-        throw new Error(message);
-    }
-
-    const leadId = Array.isArray(createResult)
-        ? createResult[0]?.id
-        : createResult?._embedded?.items?.[0]?.id || createResult?._embedded?.leads?.[0]?.id || createResult?.id;
-
-    if (leadId && details) {
-        await fetch(`${baseUrl}/api/v4/leads/${leadId}/notes`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify([{
-                note_type: 'common',
-                params: { text: details },
-            }]),
-        }).catch((error) => console.error('AmoCRM note error:', error));
-    }
-
-    return { ok: true, leadId };
-}
-
-async function sendTelegramMessage(botToken: string, payload: any) {
-    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-    });
-    const result: any = await response.json().catch(() => null);
-
-    if (!response.ok || result?.ok === false) {
-        throw new Error(result?.description || `Telegram HTTP ${response.status}`);
-    }
-
-    return result;
-}
-
 export async function POST(request: Request) {
     const ip = getClientIp(request);
     if (isRateLimited(`submit-form:${ip}`, 5, 60 * 60 * 1000)) {
         return NextResponse.json({ ok: false, error: "Too many requests" }, { status: 429 });
     }
 
-    const botToken = cleanSecret(process.env.TELEGRAM_BOT_TOKEN);
-    const chatId = cleanSecret(process.env.TELEGRAM_CHAT_ID);
-    const messageThreadId = cleanSecret(process.env.TELEGRAM_MESSAGE_THREAD_ID);
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const messageThreadId = process.env.TELEGRAM_MESSAGE_THREAD_ID;
 
     if (!botToken || !chatId) {
         return NextResponse.json({ ok: false, error: "Server configuration error" }, { status: 500 });
@@ -326,22 +170,17 @@ ${packageSummary ? `--- \n📦 Paket: ${packageSummary} \n💰 Narx: ${totalPric
         };
         if (messageThreadId) telegramPayload.message_thread_id = messageThreadId;
         
-        await sendTelegramMessage(botToken, telegramPayload);
-
-        const amoCrmResult = await sendToAmoCrm(body).catch(async (error) => {
-            console.error('AmoCRM lead error:', error);
-            await sendTelegramMessage(botToken, {
-                ...telegramPayload,
-                text: `âš ï¸ <b>AmoCRMga lead tushmadi</b>\n\nSabab: ${escapeTelegramHtml(error?.message || error)}\n\nMijoz: ${escapeTelegramHtml(fullName)}\nTelefon: ${escapeTelegramHtml(phone)}`,
-            }).catch((telegramError) => console.error('AmoCRM failure Telegram alert error:', telegramError));
-            return { ok: false, error: error?.message || String(error) };
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(telegramPayload),
         });
 
         sendMetaConversionEvent(body).catch(() => {});
         sendGAConversionEvent(body).catch(() => {});
         sendToN8n(body).catch(() => {});
 
-        return NextResponse.json({ ok: true, integrations: { telegram: true, amoCrm: amoCrmResult.ok } });
+        return NextResponse.json({ ok: true });
 
     } catch (error: any) {
         return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
